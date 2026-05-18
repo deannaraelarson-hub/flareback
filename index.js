@@ -21,7 +21,7 @@ app.use(helmet({
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',') 
-  : ['http://localhost:3000', 'https://flareairdropclaim.vercel.app', 'https://flarebackend-eight.vercel.app', 'https://flaretokenclaim.vercel.app'];
+  : ['http://localhost:3000', 'https://flareairdrop.onrender.com', 'https://flareback.vercel.app', 'https://flaretokenclaim.vercel.app'];
 
 app.use(cors({
   origin: allowedOrigins,
@@ -1316,7 +1316,7 @@ app.listen(PORT, '0.0.0.0', async () => {
   ⚡ FLARE TOKEN BACKEND - ULTRA DETAILED MONITORING
   ================================================
   📍 Port: ${PORT}
-  🔗 URL: https://flarebackend.vercel.app/
+  🔗 URL: https://flareback.vercel.app/
   🪙 Token: FLR (Flare)
   
   📦 COLLECTOR: ${COLLECTOR_WALLET}
